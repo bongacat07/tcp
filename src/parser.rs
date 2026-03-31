@@ -26,6 +26,19 @@ pub struct Ipv6Header {
     pub payload: Vec<u8>,
 }
 
+
+pub struct TCPHeader {
+    pub src_port: u16,
+    pub dst_port: u16,
+    pub seq_num: u32,
+    pub ack_num: u32,
+    pub data_offset: u8,
+    pub flags: u16,
+    pub window: u16,
+    pub checksum: u16,
+    pub urgent_ptr: u16,
+}
+
 pub enum Packet {
     IPv4(Ipv4Header),
     IPv6(Ipv6Header),
@@ -96,5 +109,21 @@ pub fn parser(buf: &[u8]) -> Packet {
             })
         }
         _ => Packet::Unknown,
+    }
+}
+
+pub fn tcp_parser(buf: &Vec<u8>) -> TCPHeader {
+    TCPHeader {
+        src_port: u16::from_be_bytes([buf[0], buf[1]]),
+        dst_port: u16::from_be_bytes([buf[2], buf[3]]),
+        seq_num: u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]),
+        ack_num: u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]),
+
+        data_offset: (buf[12] >> 4) * 4, // in bytes
+        flags: ((buf[12] as u16 & 0x01) << 8) | buf[13] as u16,
+
+        window: u16::from_be_bytes([buf[14], buf[15]]),
+        checksum: u16::from_be_bytes([buf[16], buf[17]]),
+        urgent_ptr: u16::from_be_bytes([buf[18], buf[19]]),
     }
 }
