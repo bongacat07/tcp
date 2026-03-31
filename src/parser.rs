@@ -1,4 +1,3 @@
-
 pub struct Ipv4Header {
     pub version: u8,
     pub ihl: u8,
@@ -12,6 +11,7 @@ pub struct Ipv4Header {
     pub header_checksum: u16,
     pub source: [u8; 4],
     pub destination: [u8; 4],
+    pub payload: Vec<u8>,
 }
 
 pub struct Ipv6Header {
@@ -23,6 +23,7 @@ pub struct Ipv6Header {
     pub hop_limit: u8,
     pub source: [u8; 16],
     pub destination: [u8; 16],
+    pub payload: Vec<u8>,
 }
 
 pub enum Packet {
@@ -30,96 +31,70 @@ pub enum Packet {
     IPv6(Ipv6Header),
     Unknown,
 }
+
 pub fn parser(buf: &[u8]) -> Packet {
     if buf.is_empty() {
         return Packet::Unknown;
     }
-
     match buf[0] >> 4 {
         4 => {
             if buf.len() < 20 {
-                return Packet::Unknown; // minimum IPv4 header size
+                return Packet::Unknown;
             }
-
-            let version = 4;
             let ihl = buf[0] & 0x0F;
-            let tos = buf[1];
-
-            let total_length =
-                ((buf[2] as u16) << 8) | buf[3] as u16;
-
-            let identification =
-                ((buf[4] as u16) << 8) | buf[5] as u16;
-
-            let flags = buf[6] >> 5;
-
-            let fragment_offset =
-                (((buf[6] as u16) & 0x1F) << 8) | buf[7] as u16;
-
-            let ttl = buf[8];
-            let protocol = buf[9];
-
-            let header_checksum =
-                ((buf[10] as u16) << 8) | buf[11] as u16;
-
-            let source = [buf[12], buf[13], buf[14], buf[15]];
-            let destination = [buf[16], buf[17], buf[18], buf[19]];
+            if ihl < 5 {
+                return Packet::Unknown;
+            }
+            let total_length = ((buf[2] as u16) << 8) | buf[3] as u16;
+            if total_length as usize > buf.len() {
+                return Packet::Unknown;
+            }
+            let header_end = ihl as usize * 4;
+            if header_end > total_length as usize {
+                return Packet::Unknown;
+            }
+            let payload = buf[header_end..total_length as usize].to_vec();
 
             Packet::IPv4(Ipv4Header {
-                version,
+                version: 4,
                 ihl,
-                tos,
+                tos: buf[1],
                 total_length,
-                identification,
-                flags,
-                fragment_offset,
-                ttl,
-                protocol,
-                header_checksum,
-                source,
-                destination,
+                identification: ((buf[4] as u16) << 8) | buf[5] as u16,
+                flags: buf[6] >> 5,
+                fragment_offset: (((buf[6] as u16) & 0x1F) << 8) | buf[7] as u16,
+                ttl: buf[8],
+                protocol: buf[9],
+                header_checksum: ((buf[10] as u16) << 8) | buf[11] as u16,
+                source: [buf[12], buf[13], buf[14], buf[15]],
+                destination: [buf[16], buf[17], buf[18], buf[19]],
+                payload,
             })
         }
-
         6 => {
             if buf.len() < 40 {
-                return Packet::Unknown; // minimum IPv6 header
+                return Packet::Unknown;
             }
-
-            let version = 6;
-
-            let traffic_class =
-                ((buf[0] & 0x0F) << 4) | (buf[1] >> 4);
-
-            let flow_label =
-                (((buf[1] as u32) & 0x0F) << 16)
-                | ((buf[2] as u32) << 8)
-                | buf[3] as u32;
-
-            let payload_length =
-                ((buf[4] as u16) << 8) | buf[5] as u16;
-
-            let next_header = buf[6];
-            let hop_limit = buf[7];
-
-            let mut source = [0u8; 16];
-            source.copy_from_slice(&buf[8..24]);
-
-            let mut destination = [0u8; 16];
-            destination.copy_from_slice(&buf[24..40]);
+            let payload_length = ((buf[4] as u16) << 8) | buf[5] as u16;
+            if 40 + payload_length as usize > buf.len() {
+                return Packet::Unknown;
+            }
+            let payload = buf[40..40 + payload_length as usize].to_vec();
 
             Packet::IPv6(Ipv6Header {
-                version,
-                traffic_class,
-                flow_label,
+                version: 6,
+                traffic_class: ((buf[0] & 0x0F) << 4) | (buf[1] >> 4),
+                flow_label: (((buf[1] as u32) & 0x0F) << 16)
+                    | ((buf[2] as u32) << 8)
+                    | buf[3] as u32,
                 payload_length,
-                next_header,
-                hop_limit,
-                source,
-                destination,
+                next_header: buf[6],
+                hop_limit: buf[7],
+                source: buf[8..24].try_into().unwrap(),
+                destination: buf[24..40].try_into().unwrap(),
+                payload,
             })
         }
-
         _ => Packet::Unknown,
     }
 }

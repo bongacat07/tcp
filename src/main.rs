@@ -3,9 +3,6 @@ pub mod parser;
 use parser::{parser, Packet};
 
 fn main() {
-
-
-
     let dev = DeviceBuilder::new()
         .name("tun0")
         .ipv4("10.0.0.12", 24, None)
@@ -13,13 +10,12 @@ fn main() {
         .build_sync()
         .unwrap();
 
-    let mut buf = [0; 65535];
+    let mut buf = [0u8; 65535];
     loop {
         match dev.recv(&mut buf) {
             Ok(len) => {
                 println!("Received packet");
-                let packet = parser(&buf);
-
+                let packet = parser(&buf[..len]);
                 match packet {
                     Packet::IPv4(h) => {
                         println!("--- IPv4 Packet ---");
@@ -37,9 +33,12 @@ fn main() {
                             h.source[0], h.source[1], h.source[2], h.source[3]);
                         println!("Destination: {}.{}.{}.{}",
                             h.destination[0], h.destination[1], h.destination[2], h.destination[3]);
+                        print!("Payload: ");
+                        for byte in h.payload.iter() {
+                            print!("{:02x}", byte);
+                        }
                         println!("-------------------");
                     }
-
                     Packet::IPv6(h) => {
                         println!("--- IPv6 Packet ---");
                         println!("Version: {}", h.version);
@@ -48,28 +47,25 @@ fn main() {
                         println!("Payload Length: {}", h.payload_length);
                         println!("Next Header: {}", h.next_header);
                         println!("Hop Limit: {}", h.hop_limit);
-
                         print!("Source: ");
                         for (i, byte) in h.source.iter().enumerate() {
                             print!("{:02x}", byte);
-                            if i % 2 == 1 && i != 15 {
-                                print!(":");
-                            }
+                            if i % 2 == 1 && i != 15 { print!(":"); }
                         }
                         println!();
-
                         print!("Destination: ");
                         for (i, byte) in h.destination.iter().enumerate() {
                             print!("{:02x}", byte);
-                            if i % 2 == 1 && i != 15 {
-                                print!(":");
-                            }
+                            if i % 2 == 1 && i != 15 { print!(":"); }
                         }
                         println!();
-
+                        print!("Payload: ");
+                        for byte in h.payload.iter() {
+                            print!("{:02x}", byte);
+                        }
+                        println!();
                         println!("-------------------");
                     }
-
                     Packet::Unknown => {
                         println!("Unknown packet");
                     }
@@ -77,7 +73,7 @@ fn main() {
             }
             Err(e) => {
                 eprintln!("recv error: {}", e);
-                continue; // keep running
+                continue;
             }
         }
     }
