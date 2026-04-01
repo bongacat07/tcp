@@ -22,6 +22,11 @@ pub struct Ipv4Packet {
     pub payload: Vec<u8>,
 }
 
+pub struct TCPPacket {
+    pub header: TCPHeader,
+    pub payload: Vec<u8>,
+}
+
 pub struct Ipv6Header {
     pub version: u8,
     pub traffic_class: u8,
@@ -58,6 +63,7 @@ pub fn parser(buf: &[u8]) -> Packet {
     }
 
     match buf[0] >> 4 {
+        // ---------------- IPv4 ----------------
         4 => {
             if buf.len() < 20 {
                 return Packet::Unknown;
@@ -68,12 +74,12 @@ pub fn parser(buf: &[u8]) -> Packet {
                 return Packet::Unknown;
             }
 
-            let total_length = ((buf[2] as u16) << 8) | buf[3] as u16;
+            let total_length = u16::from_be_bytes([buf[2], buf[3]]);
             if total_length as usize > buf.len() {
                 return Packet::Unknown;
             }
 
-            let header_end = ihl as usize * 4;
+            let header_end = (ihl * 4) as usize;
             if header_end > total_length as usize {
                 return Packet::Unknown;
             }
@@ -87,7 +93,7 @@ pub fn parser(buf: &[u8]) -> Packet {
                         ihl,
                         tos: buf[1],
                         total_length,
-                        identification: ((buf[4] as u16) << 8) | buf[5] as u16,
+                        identification: u16::from_be_bytes([buf[4], buf[5]]),
                         flags: buf[6] >> 5,
                         fragment_offset: (((buf[6] as u16) & 0x1F) << 8) | buf[7] as u16,
                         ttl: buf[8],
@@ -95,18 +101,19 @@ pub fn parser(buf: &[u8]) -> Packet {
                         source: [buf[12], buf[13], buf[14], buf[15]],
                         destination: [buf[16], buf[17], buf[18], buf[19]],
                     },
-                    header_checksum: ((buf[10] as u16) << 8) | buf[11] as u16,
+                    header_checksum: u16::from_be_bytes([buf[10], buf[11]]),
                 },
                 payload,
             })
         }
 
+        // ---------------- IPv6 ----------------
         6 => {
             if buf.len() < 40 {
                 return Packet::Unknown;
             }
 
-            let payload_length = ((buf[4] as u16) << 8) | buf[5] as u16;
+            let payload_length = u16::from_be_bytes([buf[4], buf[5]]);
             if 40 + payload_length as usize > buf.len() {
                 return Packet::Unknown;
             }
@@ -131,18 +138,31 @@ pub fn parser(buf: &[u8]) -> Packet {
         _ => Packet::Unknown,
     }
 }
-pub fn tcp_parser(buf: &Vec<u8>) -> TCPHeader {
-    TCPHeader {
+
+pub fn tcp_parser(buf: &[u8]) -> Option<TCPPacket> {
+    if buf.len() < 20 {
+        return None;
+    }
+
+    let data_offset = (buf[12] >> 4) * 4;
+
+    if buf.len() < data_offset as usize {
+        return None;
+    }
+
+    let header = TCPHeader {
         src_port: u16::from_be_bytes([buf[0], buf[1]]),
         dst_port: u16::from_be_bytes([buf[2], buf[3]]),
         seq_num: u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]),
         ack_num: u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]),
-
-        data_offset: (buf[12] >> 4) * 4, // in bytes
+        data_offset,
         flags: ((buf[12] as u16 & 0x01) << 8) | buf[13] as u16,
-
         window: u16::from_be_bytes([buf[14], buf[15]]),
         checksum: u16::from_be_bytes([buf[16], buf[17]]),
         urgent_ptr: u16::from_be_bytes([buf[18], buf[19]]),
-    }
+    };
+
+    let payload = buf[data_offset as usize..].to_vec();
+
+    Some(TCPPacket { header, payload })
 }

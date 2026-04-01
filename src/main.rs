@@ -40,44 +40,47 @@ fn main() {
                             print!("{:02x}", byte);
                         }
                         println!("-------------------");
-                        if h.header.fields.protocol == 6 {
-                            println!("TCP packet received");
+                        if h.header.fields.protocol != 6 {
+                               return;
+                           }
 
-                            let header = tcp_parser(&h.payload);
-                            let header_len = header.data_offset as usize;
-                            if h.payload.len() > header_len {
-                                let tcp_payload = &h.payload[header_len..];
-                                println!("TCP payload size: {} bytes", tcp_payload.len());
-                            } else {
-                                println!("No TCP payload");
-                            }
+                           println!("TCP packet received");
 
-                            println!("Source port: {}", header.src_port);
-                            println!("Destination port: {}", header.dst_port);
-                            println!("Sequence number: {}", header.seq_num);
-                            println!("Acknowledgment number: {}", header.ack_num);
+                           let packet = tcp_parser(&h.payload);
 
-                            println!("Header length: {} bytes", header.data_offset);
-                            println!("Window size: {}", header.window);
-                            println!("Checksum: 0x{:04x}", header.checksum);
-                            println!("Urgent pointer: {}", header.urgent_ptr);
+                           match packet {
+                               Some(tcp) => {
+                                   let header = &tcp.header;
 
-                            // Decode flags (this is where it gets interesting)
-                            let flags = header.flags;
+                                   println!("Source port: {}", header.src_port);
+                                   println!("Destination port: {}", header.dst_port);
+                                   println!("Sequence number: {}", header.seq_num);
+                                   println!("Acknowledgment number: {}", header.ack_num);
 
-                            println!("Flags:");
-                            println!("  FIN: {}", (flags & 0x01) != 0);
-                            println!("  SYN: {}", (flags & 0x02) != 0);
-                            println!("  RST: {}", (flags & 0x04) != 0);
-                            println!("  PSH: {}", (flags & 0x08) != 0);
-                            println!("  ACK: {}", (flags & 0x10) != 0);
-                            println!("  URG: {}", (flags & 0x20) != 0);
-                            println!("  ECE: {}", (flags & 0x40) != 0);
-                            println!("  CWR: {}", (flags & 0x80) != 0);
+                                   println!("Header length: {} bytes", header.data_offset);
+                                   println!("Window size: {}", header.window);
+                                   println!("Checksum: 0x{:04x}", header.checksum);
+                                   println!("Urgent pointer: {}", header.urgent_ptr);
 
-                            // Optional: extract payload (after TCP header)
+                                   println!("TCP payload size: {} bytes", tcp.payload.len());
 
-                        }
+                                   let flags = header.flags;
+
+                                   println!("Flags:");
+                                   println!("  FIN: {}", (flags & 0x01) != 0);
+                                   println!("  SYN: {}", (flags & 0x02) != 0);
+                                   println!("  RST: {}", (flags & 0x04) != 0);
+                                   println!("  PSH: {}", (flags & 0x08) != 0);
+                                   println!("  ACK: {}", (flags & 0x10) != 0);
+                                   println!("  URG: {}", (flags & 0x20) != 0);
+                                   println!("  ECE: {}", (flags & 0x40) != 0);
+                                   println!("  CWR: {}", (flags & 0x80) != 0);
+                               }
+
+                               None => {
+                                   println!("Invalid TCP packet");
+                               }
+                           }
                     }
                     Packet::IPv6(h) => {
                         println!("--- IPv6 Packet ---");
