@@ -21,26 +21,26 @@ fn main() {
                 match packet {
                     Packet::IPv4(h) => {
                         println!("--- IPv4 Packet ---");
-                        println!("Version: {}", h.version);
-                        println!("IHL: {}", h.ihl);
-                        println!("TOS: {}", h.tos);
-                        println!("Total Length: {}", h.total_length);
-                        println!("Identification: {}", h.identification);
-                        println!("Flags: {}", h.flags);
-                        println!("Fragment Offset: {}", h.fragment_offset);
-                        println!("TTL: {}", h.ttl);
-                        println!("Protocol: {}", h.protocol);
-                        println!("Header Checksum: {}", h.header_checksum);
+                        println!("Version: {}", h.header.fields.version);
+                        println!("IHL: {}", h.header.fields.ihl);
+                        println!("TOS: {}", h.header.fields.tos);
+                        println!("Total Length: {}", h.header.fields.total_length);
+                        println!("Identification: {}", h.header.fields.identification);
+                        println!("Flags: {}", h.header.fields.flags);
+                        println!("Fragment Offset: {}", h.header.fields.fragment_offset);
+                        println!("TTL: {}", h.header.fields.ttl);
+                        println!("Protocol: {}", h.header.fields.protocol);
+                        println!("Header Checksum: {}", h.header.header_checksum);
                         println!("Source: {}.{}.{}.{}",
-                            h.source[0], h.source[1], h.source[2], h.source[3]);
+                            h.header.fields.source[0], h.header.fields.source[1], h.header.fields.source[2], h.header.fields.source[3]);
                         println!("Destination: {}.{}.{}.{}",
-                            h.destination[0], h.destination[1], h.destination[2], h.destination[3]);
+                            h.header.fields.destination[0], h.header.fields.destination[1], h.header.fields.destination[2], h.header.fields.destination[3]);
                         print!("Payload: ");
                         for byte in h.payload.iter() {
                             print!("{:02x}", byte);
                         }
                         println!("-------------------");
-                        if h.protocol == 6 {
+                        if h.header.fields.protocol == 6 {
                             println!("TCP packet received");
 
                             let header = tcp_parser(&h.payload);
