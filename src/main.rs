@@ -1,5 +1,5 @@
 use tun_rs::DeviceBuilder;
-pub mod parser;
+pub mod lib;
 use parser::{parser, Packet};
 
 use crate::parser::tcp_parser;
