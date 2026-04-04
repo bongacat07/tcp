@@ -1,8 +1,47 @@
 use tun_rs::DeviceBuilder;
-pub mod lib;
-use parser::{parser, Packet};
 
-use crate::parser::tcp_parser;
+use tcp::{
+    parser, tcp_parser, ip_checksum, tcp_checksum,
+    Packet, Ipv4Packet, Ipv6Header, TCPPacket,
+    TCPState, Ipv4Header, Ipv4HeaderFields, TCPHeader
+};
+
+fn print_ipv4(h: &Ipv4Packet) {
+    println!("--- IPv4 Packet ---");
+    println!("Version: {}", h.header.fields.version);
+    println!("IHL: {}", h.header.fields.ihl);
+    println!("Protocol: {}", h.header.fields.protocol);
+    println!("Source: {}.{}.{}.{}",
+        h.header.fields.source[0],
+        h.header.fields.source[1],
+        h.header.fields.source[2],
+        h.header.fields.source[3]);
+    println!("Destination: {}.{}.{}.{}",
+        h.header.fields.destination[0],
+        h.header.fields.destination[1],
+        h.header.fields.destination[2],
+        h.header.fields.destination[3]);
+    println!("-------------------");
+}
+
+fn print_tcp(tcp: &TCPPacket) {
+    let h = &tcp.header;
+
+    println!("--- TCP ---");
+    println!("Src Port: {}", h.src_port);
+    println!("Dst Port: {}", h.dst_port);
+    println!("Seq: {}", h.seq_num);
+    println!("Ack: {}", h.ack_num);
+
+    let flags = h.flags;
+    println!("Flags: SYN={} ACK={}",
+        (flags & 0x02) != 0,
+        (flags & 0x10) != 0);
+}
+
+fn print_ipv6(_: &Ipv6Header) {
+    println!("IPv6 packet");
+}
 
 fn main() {
     let dev = DeviceBuilder::new()
@@ -12,111 +51,97 @@ fn main() {
         .build_sync()
         .unwrap();
 
+    let mut state = TCPState::Closed;
     let mut buf = [0u8; 65535];
+
     loop {
         match dev.recv(&mut buf) {
             Ok(len) => {
-                println!("Received packet");
                 let packet = parser(&buf[..len]);
+
                 match packet {
                     Packet::IPv4(h) => {
-                        println!("--- IPv4 Packet ---");
-                        println!("Version: {}", h.header.fields.version);
-                        println!("IHL: {}", h.header.fields.ihl);
-                        println!("TOS: {}", h.header.fields.tos);
-                        println!("Total Length: {}", h.header.fields.total_length);
-                        println!("Identification: {}", h.header.fields.identification);
-                        println!("Flags: {}", h.header.fields.flags);
-                        println!("Fragment Offset: {}", h.header.fields.fragment_offset);
-                        println!("TTL: {}", h.header.fields.ttl);
-                        println!("Protocol: {}", h.header.fields.protocol);
-                        println!("Header Checksum: {}", h.header.header_checksum);
-                        println!("Source: {}.{}.{}.{}",
-                            h.header.fields.source[0], h.header.fields.source[1], h.header.fields.source[2], h.header.fields.source[3]);
-                        println!("Destination: {}.{}.{}.{}",
-                            h.header.fields.destination[0], h.header.fields.destination[1], h.header.fields.destination[2], h.header.fields.destination[3]);
-                        print!("Payload: ");
-                        for byte in h.payload.iter() {
-                            print!("{:02x}", byte);
-                        }
-                        println!("-------------------");
+                        print_ipv4(&h);
+
                         if h.header.fields.protocol != 6 {
-                               return;
-                           }
+                            continue;
+                        }
 
-                           println!("TCP packet received");
+                        let packet = tcp_parser(&h.payload);
 
-                           let packet = tcp_parser(&h.payload);
+                        if let Some(tcp) = packet {
+                            print_tcp(&tcp);
 
-                           match packet {
-                               Some(tcp) => {
-                                   let header = &tcp.header;
+                            let flags = tcp.header.flags;
 
-                                   println!("Source port: {}", header.src_port);
-                                   println!("Destination port: {}", header.dst_port);
-                                   println!("Sequence number: {}", header.seq_num);
-                                   println!("Acknowledgment number: {}", header.ack_num);
+                            // ---------------- SYN RECEIVED ----------------
+                            if (flags & 0x02) != 0 {
+                                state = TCPState::SynRecieved;
 
-                                   println!("Header length: {} bytes", header.data_offset);
-                                   println!("Window size: {}", header.window);
-                                   println!("Checksum: 0x{:04x}", header.checksum);
-                                   println!("Urgent pointer: {}", header.urgent_ptr);
+                                let recv_ip = &h.header.fields;
+                                let recv_tcp = &tcp.header;
 
-                                   println!("TCP payload size: {} bytes", tcp.payload.len());
+                                // -------- TCP SYN-ACK --------
+                                let mut tcp_packet = TCPPacket {
+                                    header: TCPHeader {
+                                        src_port: recv_tcp.dst_port,
+                                        dst_port: recv_tcp.src_port,
+                                        seq_num: 0,
+                                        ack_num: recv_tcp.seq_num + 1,
+                                        data_offset: 5,
+                                        flags: 0x12,
+                                        window: 64240,
+                                        checksum: 0,
+                                        urgent_ptr: 0,
+                                    },
+                                    payload: vec![],
+                                };
 
-                                   let flags = header.flags;
+                                // -------- IP --------
+                                let mut ip_packet = Ipv4Packet {
+                                    header: Ipv4Header {
+                                        fields: Ipv4HeaderFields {
+                                            version: 4,
+                                            ihl: 5,
+                                            tos: 0,
+                                            total_length: 40,
+                                            identification: 0,
+                                            flags: 0,
+                                            fragment_offset: 0,
+                                            ttl: 64,
+                                            protocol: 6,
+                                            source: recv_ip.destination,
+                                            destination: recv_ip.source,
+                                        },
+                                        header_checksum: 0,
+                                    },
+                                    payload: vec![],
+                                };
 
-                                   println!("Flags:");
-                                   println!("  FIN: {}", (flags & 0x01) != 0);
-                                   println!("  SYN: {}", (flags & 0x02) != 0);
-                                   println!("  RST: {}", (flags & 0x04) != 0);
-                                   println!("  PSH: {}", (flags & 0x08) != 0);
-                                   println!("  ACK: {}", (flags & 0x10) != 0);
-                                   println!("  URG: {}", (flags & 0x20) != 0);
-                                   println!("  ECE: {}", (flags & 0x40) != 0);
-                                   println!("  CWR: {}", (flags & 0x80) != 0);
-                               }
+                                // -------- Serialize TCP --------
 
-                               None => {
-                                   println!("Invalid TCP packet");
-                               }
-                           }
+                            }
+
+                            // ---------------- ACK RECEIVED ----------------
+                            if (flags & 0x10) != 0 {
+                                state = TCPState::Established;
+                                println!("Handshake complete");
+                            }
+                        }
                     }
+
                     Packet::IPv6(h) => {
-                        println!("--- IPv6 Packet ---");
-                        println!("Version: {}", h.version);
-                        println!("Traffic Class: {}", h.traffic_class);
-                        println!("Flow Label: {}", h.flow_label);
-                        println!("Payload Length: {}", h.payload_length);
-                        println!("Next Header: {}", h.next_header);
-                        println!("Hop Limit: {}", h.hop_limit);
-                        print!("Source: ");
-                        for (i, byte) in h.source.iter().enumerate() {
-                            print!("{:02x}", byte);
-                            if i % 2 == 1 && i != 15 { print!(":"); }
-                        }
-                        println!();
-                        print!("Destination: ");
-                        for (i, byte) in h.destination.iter().enumerate() {
-                            print!("{:02x}", byte);
-                            if i % 2 == 1 && i != 15 { print!(":"); }
-                        }
-                        println!();
-                        print!("Payload: ");
-                        for byte in h.payload.iter() {
-                            print!("{:02x}", byte);
-                        }
-                        println!();
-                        println!("-------------------");
+                        print_ipv6(&h);
                     }
+
                     Packet::Unknown => {
                         println!("Unknown packet");
                     }
                 }
             }
+
             Err(e) => {
                 eprintln!("recv error: {}", e);
-                continue;
             }
         }
     }

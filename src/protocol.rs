@@ -55,3 +55,9 @@ pub struct TCPHeader {
     pub checksum: u16,
     pub urgent_ptr: u16,
 }
+
+pub enum TCPState{
+    Closed,
+    SynRecieved,
+    Established,
+}
