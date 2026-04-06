@@ -20,3 +20,7 @@ pub use checksum::{
     tcp_checksum,
     ip_checksum,
 };
+
+pub use protocol::{
+    create_packet,
+};

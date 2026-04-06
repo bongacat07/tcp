@@ -1,9 +1,9 @@
 use tun_rs::DeviceBuilder;
 
 use tcp::{
-    parser, tcp_parser, ip_checksum, tcp_checksum,
+    parser, tcp_parser, ip_checksum, tcp_checksum, create_packet,
     Packet, Ipv4Packet, Ipv6Header, TCPPacket,
-    TCPState, Ipv4Header, Ipv4HeaderFields, TCPHeader
+    TCPState, Ipv4Header, Ipv4HeaderFields, TCPHeader,
 };
 
 fn print_ipv4(h: &Ipv4Packet) {
@@ -26,13 +26,11 @@ fn print_ipv4(h: &Ipv4Packet) {
 
 fn print_tcp(tcp: &TCPPacket) {
     let h = &tcp.header;
-
     println!("--- TCP ---");
     println!("Src Port: {}", h.src_port);
     println!("Dst Port: {}", h.dst_port);
     println!("Seq: {}", h.seq_num);
     println!("Ack: {}", h.ack_num);
-
     let flags = h.flags;
     println!("Flags: SYN={} ACK={}",
         (flags & 0x02) != 0,
@@ -74,33 +72,28 @@ fn main() {
 
                             let flags = tcp.header.flags;
 
-                            // ---------------- SYN RECEIVED ----------------
-                            if (flags & 0x02) != 0 {
-                                state = TCPState::SynRecieved;
+                            match state {
+                                TCPState::Closed => {
+                                    if (flags & 0x02) != 0 && (flags & 0x10) == 0 {
+                                        let recv_ip = &h.header.fields;
+                                        let recv_tcp = &tcp.header;
 
-                                let recv_ip = &h.header.fields;
-                                let recv_tcp = &tcp.header;
+                                        let mut tcp_packet = TCPPacket {
+                                            header: TCPHeader {
+                                                src_port: recv_tcp.dst_port,
+                                                dst_port: recv_tcp.src_port,
+                                                seq_num: 0,
+                                                ack_num: recv_tcp.seq_num + 1,
+                                                data_offset: 5,
+                                                flags: 0x12,
+                                                window: 64240,
+                                                checksum: 0,
+                                                urgent_ptr: 0,
+                                            },
+                                            payload: vec![],
+                                        };
 
-                                // -------- TCP SYN-ACK --------
-                                let mut tcp_packet = TCPPacket {
-                                    header: TCPHeader {
-                                        src_port: recv_tcp.dst_port,
-                                        dst_port: recv_tcp.src_port,
-                                        seq_num: 0,
-                                        ack_num: recv_tcp.seq_num + 1,
-                                        data_offset: 5,
-                                        flags: 0x12,
-                                        window: 64240,
-                                        checksum: 0,
-                                        urgent_ptr: 0,
-                                    },
-                                    payload: vec![],
-                                };
-
-                                // -------- IP --------
-                                let mut ip_packet = Ipv4Packet {
-                                    header: Ipv4Header {
-                                        fields: Ipv4HeaderFields {
+                                        let ip_fields = Ipv4HeaderFields {
                                             version: 4,
                                             ihl: 5,
                                             tos: 0,
@@ -112,20 +105,38 @@ fn main() {
                                             protocol: 6,
                                             source: recv_ip.destination,
                                             destination: recv_ip.source,
-                                        },
-                                        header_checksum: 0,
-                                    },
-                                    payload: vec![],
-                                };
+                                        };
 
-                                // -------- Serialize TCP --------
+                                        let ip_chk = ip_checksum(&ip_fields);
+                                        let tcp_chk = tcp_checksum(
+                                            recv_ip.destination,
+                                            recv_ip.source,
+                                            &tcp_packet,
+                                        );
+                                        tcp_packet.header.checksum = tcp_chk;
 
-                            }
+                                        let ip_header = Ipv4Header {
+                                            fields: ip_fields,
+                                            header_checksum: ip_chk,
+                                        };
 
-                            // ---------------- ACK RECEIVED ----------------
-                            if (flags & 0x10) != 0 {
-                                state = TCPState::Established;
-                                println!("Handshake complete");
+                                        let packet = create_packet(&tcp_packet, &ip_header);
+                                        dev.send(&packet);
+
+                                        state = TCPState::SynRecieved;
+                                        println!("SYN received, SYN-ACK sent");
+                                    }
+                                }
+
+                                TCPState::SynRecieved => {
+                                    if (flags & 0x10) != 0 && (flags & 0x02) == 0 {
+                                        state = TCPState::Established;
+                                        println!("Handshake complete");
+                                    }
+                                }
+
+                                TCPState::Established => {
+                                }
                             }
                         }
                     }
