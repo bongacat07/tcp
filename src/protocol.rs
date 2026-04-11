@@ -58,7 +58,8 @@ pub struct TCPHeader {
 
 pub enum TCPState{
     Closed,
-    SynRecieved,
+    Listen,
+    SynReceived,
     Established,
 }
 pub struct TCB {
@@ -69,15 +70,13 @@ pub struct TCB {
     pub irs: u32,
     pub iss: u32,
 }
-
+#[derive(Hash, Eq, PartialEq)]
 pub struct ConnectionKey {
-    pub src_ip: [u8;4],
+    pub src_ip: [u8; 4],
     pub src_port: u16,
-    pub dst_ip: [u8;4],
+    pub dst_ip: [u8; 4],
     pub dst_port: u16,
 }
-
-
 pub fn create_packet(x: &TCPPacket, y: &Ipv4Header) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
 
