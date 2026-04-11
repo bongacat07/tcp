@@ -101,7 +101,9 @@ fn main() {
                                         }
                                     }
 
-                                    _ => {}
+                                    _ => {
+                                        (print!("Other states handling to be done"))
+                                    }
                                 }
                             }
                             else{
