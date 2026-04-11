@@ -3,8 +3,9 @@ use tun_rs::DeviceBuilder;
 use tcp::{
     parser, tcp_parser, ip_checksum, tcp_checksum, create_packet,
     Packet, Ipv4Packet, Ipv6Header, TCPPacket,
-    TCPState, Ipv4Header, Ipv4HeaderFields, TCPHeader,
+    TCPState, Ipv4Header, Ipv4HeaderFields, TCPHeader,TCB,ConnectionKey
 };
+use std::collections::HashMap;
 
 fn print_ipv4(h: &Ipv4Packet) {
     println!("--- IPv4 Packet ---");
@@ -51,6 +52,7 @@ fn main() {
 
     let mut state = TCPState::Closed;
     let mut buf = [0u8; 65535];
+    let mut connections: HashMap<ConnectionKey, TCB> = HashMap::new();
 
     loop {
         match dev.recv(&mut buf) {

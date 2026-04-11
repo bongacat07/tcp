@@ -10,6 +10,8 @@ pub use protocol::{
     TCPPacket,
     TCPHeader,
     TCPState,
+    TCB,
+    ConnectionKey,
 };
 
 pub use parser::{
