@@ -57,8 +57,13 @@ pub struct TCPHeader {
 }
 
 pub enum TCPState{
-    Closed,
-    Listen,
+    SynSent,
+    FinWait1,
+    FinWait2,
+    CloseWait,
+    Closing,
+    LastAck,
+    TimeWait,
     SynReceived,
     Established,
 }

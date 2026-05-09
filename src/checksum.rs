@@ -42,24 +42,18 @@ pub fn tcp_checksum(
 
     let h = &tcp.header;
 
-    // ---------------- PSEUDO HEADER ----------------
 
-    // Source IP
     sum += u16::from_be_bytes([src_ip[0], src_ip[1]]) as u32;
     sum += u16::from_be_bytes([src_ip[2], src_ip[3]]) as u32;
 
-    // Destination IP
     sum += u16::from_be_bytes([dst_ip[0], dst_ip[1]]) as u32;
     sum += u16::from_be_bytes([dst_ip[2], dst_ip[3]]) as u32;
 
-    // Protocol (6)
     sum += 6;
 
-    // TCP length
     let tcp_len = (h.data_offset as usize * 4 + tcp.payload.len()) as u16;
     sum += tcp_len as u32;
 
-    // ---------------- TCP HEADER ----------------
 
     sum += h.src_port as u32;
     sum += h.dst_port as u32;
@@ -70,18 +64,15 @@ pub fn tcp_checksum(
     sum += (h.ack_num >> 16) as u32;
     sum += (h.ack_num & 0xFFFF) as u32;
 
-    // data_offset + flags
     let data_flags =
         ((h.data_offset as u16) << 12) | (h.flags & 0x0FFF);
     sum += data_flags as u32;
 
     sum += h.window as u32;
 
-    // checksum = 0 (skip)
 
     sum += h.urgent_ptr as u32;
 
-    // ---------------- PAYLOAD ----------------
 
     let mut i = 0;
     let payload = &tcp.payload;
@@ -97,7 +88,6 @@ pub fn tcp_checksum(
         i += 2;
     }
 
-    // ---------------- FINALIZE ----------------
 
     while (sum >> 16) != 0 {
         sum = (sum & 0xFFFF) + (sum >> 16);
