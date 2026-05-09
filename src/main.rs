@@ -8,6 +8,112 @@ use tcp::{
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+fn send_rst(dev: &tun_rs::SyncDevice, recv_ip: &Ipv4HeaderFields, recv_tcp: &TCPHeader) {
+    let mut tcp_packet = TCPPacket {
+        header: TCPHeader {
+            src_port: recv_tcp.dst_port,
+            dst_port: recv_tcp.src_port,
+            seq_num: recv_tcp.ack_num,
+            ack_num: recv_tcp.seq_num + 1,
+            data_offset: 5,
+            flags: 0x04,
+            window: 0,
+            checksum: 0,
+            urgent_ptr: 0,
+        },
+        payload: vec![],
+    };
+
+    let ip_fields = Ipv4HeaderFields {
+        version: 4,
+        ihl: 5,
+        tos: 0,
+        total_length: 40,
+        identification: 0,
+        flags: 0,
+        fragment_offset: 0,
+        ttl: 64,
+        protocol: 6,
+        source: recv_ip.destination,
+        destination: recv_ip.source,
+    };
+
+    let ip_chk = ip_checksum(&ip_fields);
+    tcp_packet.header.checksum = tcp_checksum(recv_ip.destination, recv_ip.source, &tcp_packet);
+
+    let ip_header = Ipv4Header { fields: ip_fields, header_checksum: ip_chk };
+    dev.send(&create_packet(&tcp_packet, &ip_header));
+    println!("RST sent");
+}
+fn send_fin(dev: &tun_rs::SyncDevice, recv_ip: &Ipv4HeaderFields, recv_tcp: &TCPHeader, seq: u32, ack: u32) {
+    let mut tcp_packet = TCPPacket {
+        header: TCPHeader {
+            src_port: recv_tcp.dst_port,
+            dst_port: recv_tcp.src_port,
+            seq_num: seq,
+            ack_num: ack,
+            data_offset: 5,
+            flags: 0x11,
+            window: 64240,
+            checksum: 0,
+            urgent_ptr: 0,
+        },
+        payload: vec![],
+    };
+    let ip_fields = Ipv4HeaderFields {
+        version: 4,
+        ihl: 5,
+        tos: 0,
+        total_length: 40,
+        identification: 0,
+        flags: 0,
+        fragment_offset: 0,
+        ttl: 64,
+        protocol: 6,
+        source: recv_ip.destination,
+        destination: recv_ip.source,
+    };
+    let ip_chk = ip_checksum(&ip_fields);
+    tcp_packet.header.checksum = tcp_checksum(recv_ip.destination, recv_ip.source, &tcp_packet);
+    let ip_header = Ipv4Header { fields: ip_fields, header_checksum: ip_chk };
+    dev.send(&create_packet(&tcp_packet, &ip_header));
+    println!("FIN sent");
+}
+fn send_ack(dev: &tun_rs::SyncDevice, recv_ip: &Ipv4HeaderFields, recv_tcp: &TCPHeader, seq: u32, ack: u32) {
+    let mut tcp_packet = TCPPacket {
+        header: TCPHeader {
+            src_port: recv_tcp.dst_port,
+            dst_port: recv_tcp.src_port,
+            seq_num: seq,
+            ack_num: ack,
+            data_offset: 5,
+            flags: 0x10,
+            window: 64240,
+            checksum: 0,
+            urgent_ptr: 0,
+        },
+        payload: vec![],
+    };
+    let ip_fields = Ipv4HeaderFields {
+        version: 4,
+        ihl: 5,
+        tos: 0,
+        total_length: 40,
+        identification: 0,
+        flags: 0,
+        fragment_offset: 0,
+        ttl: 64,
+        protocol: 6,
+        source: recv_ip.destination,
+        destination: recv_ip.source,
+    };
+    let ip_chk = ip_checksum(&ip_fields);
+    tcp_packet.header.checksum = tcp_checksum(recv_ip.destination, recv_ip.source, &tcp_packet);
+    let ip_header = Ipv4Header { fields: ip_fields, header_checksum: ip_chk };
+    dev.send(&create_packet(&tcp_packet, &ip_header));
+    println!("ACK sent");
+}
+
 
 fn print_ipv4(h: &Ipv4Packet) {
     println!("--- IPv4 Packet ---");
@@ -107,6 +213,11 @@ fn main() {
                             if let Some(tcb) = connections.get_mut(&key) {
                                 let flags = tcp.header.flags;
 
+                                if flags & 0b000100 != 0 {
+                                    connections.remove(&key);
+                                    println!("RST received, connection aborted");
+                                    continue;
+                                }
                                 match tcb.state {
                                     TCPState::SynReceived => {
                                         if (flags & 0x10) != 0 && (flags & 0x02) == 0 {
@@ -117,25 +228,83 @@ fn main() {
                                                 println!("Handshake complete");
                                             } else {
                                                 println!("Invalid ACK");
+                                                send_rst(&dev, &h.header.fields, &tcp.header);
+                                                continue;
+                                            }
+
+
+                                        }
+                                        else if (flags & 0x02) != 0 {
+                                                println!("Duplicate SYN in SynReceived");
+                                                send_rst(&dev, &h.header.fields, &tcp.header);
+                                                connections.remove(&key);
+                                                continue;
+                                            }
+                                    }
+                                        TCPState::SynSent     => { println!("SynSent: TODO"); continue; }
+                                        TCPState::Established => {
+                                            if flags & 0x02 != 0 {
+                                                println!("Duplicate SYN in Established");
+                                                send_rst(&dev, &h.header.fields, &tcp.header);
+                                                connections.remove(&key);
+                                                continue;
+                                            }
+
+                                            if flags & 0x18 == 0x18 {
+                                                if tcp.header.seq_num == tcb.rcv_nxt {
+                                                    println!("Data: {:?}", String::from_utf8_lossy(&tcp.payload));
+                                                    tcb.rcv_nxt += tcp.payload.len() as u32;
+                                                    send_ack(&dev, &h.header.fields, &tcp.header, tcb.snd_nxt, tcb.rcv_nxt);
+                                                } else {
+                                                    println!("Out of order segment, expected {}, got {}", tcb.rcv_nxt, tcp.header.seq_num);
+                                                }
+                                            }
+                                            if flags & 0x01 != 0 {
+                                                if tcp.header.seq_num == tcb.rcv_nxt {
+                                                    println!("Fin Recieved");
+                                                    tcb.rcv_nxt+=1;
+                                                    send_ack(&dev, &h.header.fields, &tcp.header, tcb.snd_nxt, tcb.rcv_nxt);
+                                                    tcb.state = TCPState::CloseWait;
+                                                }
                                             }
                                         }
-                                    }
+                                        TCPState::FinWait1    => { println!("FinWait1: TODO"); continue; }
+                                        TCPState::FinWait2    => { println!("FinWait2: TODO"); continue; }
+                                        TCPState::CloseWait   => {
+                                            send_fin(&dev, &h.header.fields, &tcp.header, tcb.snd_nxt, tcb.rcv_nxt);
+                                            tcb.snd_nxt += 1;
+                                            tcb.state = TCPState::LastAck;
 
-                                    _ => {
-                                        (print!("Other states handling to be done"))
-                                    }
+
+                                        }
+                                        TCPState::Closing     => { println!("Closing: TODO"); continue; }
+                                        TCPState::LastAck => {
+                                            if (flags & 0x10) != 0 && (flags & 0x02) == 0 {
+                                                if tcp.header.ack_num == tcb.snd_nxt {
+                                                    println!("Last ACK received, connection closed");
+                                                    connections.remove(&key);
+                                                } else {
+                                                    println!("Invalid ACK");
+                                                    send_rst(&dev, &h.header.fields, &tcp.header);
+                                                }
+                                            }
+                                        }
+                                        TCPState::TimeWait    => { println!("TimeWait: TODO"); continue; }
+                                        TCPState::Closed      => { connections.remove(&key); continue; }
                                 }
                             }
                             else{
                                 if !listener.contains(&tcp.header.dst_port){
-                                    print!("RST implementation do be done");
+                                    let recv_ip = &h.header.fields;
+                                    let recv_tcp = &tcp.header;
+                                    send_rst(&dev, &h.header.fields, &tcp.header);
                                     continue;
                                 }
                                 let flags = tcp.header.flags;
                                 if (flags & 0x02) != 0 && (flags & 0x10) == 0 {
                                     let recv_ip = &h.header.fields;
                                     let recv_tcp = &tcp.header;
-                                    let iss: u32 = 1000; //for now
+                                    let iss: u32 = rand::random();
                                     let mut tcp_packet = TCPPacket {
                                         header: TCPHeader {
                                             src_port: recv_tcp.dst_port,
@@ -195,6 +364,9 @@ fn main() {
 
 
                                     println!("SYN received, SYN-ACK sent");
+                                }
+                                else {
+                                    send_rst(&dev, &h.header.fields, &tcp.header);
                                 }
                             }
 

@@ -57,6 +57,7 @@ pub struct TCPHeader {
 }
 
 pub enum TCPState{
+    Closed,
     SynSent,
     FinWait1,
     FinWait2,
