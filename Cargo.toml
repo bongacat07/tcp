@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tun-rs = "2"
+tun-rs = { version = "2", features = ["interruptible"] }
 thiserror = "1"
 rand = "0.10"

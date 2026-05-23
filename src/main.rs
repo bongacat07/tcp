@@ -1,5 +1,8 @@
 use tun_rs::DeviceBuilder;
+use tun_rs::InterruptEvent;
 use rand::Rng;
+use std::time::Duration;
+use std::io::ErrorKind;
 use tcp::{
     parser, tcp_parser, ip_checksum, tcp_checksum, create_packet,
     Packet, Ipv4Packet, Ipv6Header, TCPPacket,
@@ -7,6 +10,15 @@ use tcp::{
 };
 use std::collections::HashMap;
 use std::collections::HashSet;
+fn parse_request(buf: &[u8]) -> Option<(&str, &str)> {
+    let line = std::str::from_utf8(buf).ok()?;
+    let line = line.trim_end_matches("\r\n");
+    let mut parts = line.splitn(2, ' ');
+    let method = parts.next()?;
+    let filename = parts.next()?;
+    Some((method, filename))
+}
+
 
 fn send_rst(dev: &tun_rs::SyncDevice, recv_ip: &Ipv4HeaderFields, recv_tcp: &TCPHeader) {
     let mut tcp_packet = TCPPacket {
@@ -178,13 +190,15 @@ fn main() {
         .build_sync()
         .unwrap();
 
+    dev.set_nonblocking(true).unwrap();
+    let event = InterruptEvent::new().unwrap();
     let mut buf = [0u8; 65535];
     let mut connections: HashMap<ConnectionKey, TCB> = HashMap::new();
     let mut listener: HashSet<u16> = HashSet::new();
     listener.insert(8080);
 
     loop {
-        match dev.recv(&mut buf) {
+         match dev.recv_intr_timeout(&mut buf, &event, Some(Duration::from_millis(100)))  {
             Ok(len) => {
                 let packet = parser(&buf[..len]);
 
@@ -252,7 +266,12 @@ fn main() {
 
                                             if flags & 0x18 == 0x18 {
                                                 if tcp.header.seq_num == tcb.rcv_nxt {
-                                                    println!("Data: {:?}", String::from_utf8_lossy(&tcp.payload));
+                                                    match parse_request(&tcp.payload) {
+                                                        Some(("GET", filename)) => { println!("GET request received: {}", filename); }
+                                                        Some(("PUT", rest))     => { println!("PUT request received: {}", rest); }
+                                                        Some(("DELETE", filename)) => { println!("DELETE request received: {}", filename); }
+                                                        _ => { println!("Unknown request"); }
+                                                    }
                                                     tcb.rcv_nxt += tcp.payload.len() as u32;
                                                     send_ack(&dev, &h.header.fields, &tcp.header, tcb.snd_nxt, tcb.rcv_nxt);
                                                 } else {
@@ -384,7 +403,14 @@ fn main() {
                     }
                 }
             }
+            Err(e) if e.kind() == ErrorKind::TimedOut => {
+                println!("100 ms passed, no packet arrived");
 
+            }
+                    Err(e) if e.kind() == ErrorKind::Interrupted => {
+
+                                break;
+                            }
             Err(e) => {
                 eprintln!("recv error: {}", e);
             }
