@@ -1,8 +1,17 @@
+use crate::checksum::*;
+
 pub enum Packet {
     IPv4(Ipv4Packet),
     IPv6(Ipv6Header),
     Unknown,
 }
+
+pub const SYN: u16 = 0b0000_0000_0000_0010;
+pub const ACK: u16 = 0b0000_0000_0001_0000;
+pub const FIN: u16 = 0b0000_0000_0000_0001;
+pub const RST: u16 = 0b0000_0000_0000_0100;
+pub const PSH: u16 = 0b0000_0000_0000_1000;
+pub const URG: u16 = 0b0000_0000_0010_0000;
 
 pub struct Ipv4HeaderFields {
     pub version: u8,
@@ -115,4 +124,113 @@ pub fn create_packet(x: &TCPPacket, y: &Ipv4Header) -> Vec<u8> {
     buf.extend_from_slice(&x.payload);
 
     buf
+}
+pub fn check_flags(incoming_flags: &u16, tcp_flags: u16 ) -> bool {
+    return (incoming_flags & tcp_flags != 0)
+}
+
+pub fn send_rst(dev: &tun_rs::SyncDevice, recv_ip: &Ipv4HeaderFields, recv_tcp: &TCPHeader) {
+    let mut tcp_packet = TCPPacket {
+        header: TCPHeader {
+            src_port: recv_tcp.dst_port,
+            dst_port: recv_tcp.src_port,
+            seq_num: recv_tcp.ack_num,
+            ack_num: recv_tcp.seq_num + 1,
+            data_offset: 5,
+            flags: 0x04,
+            window: 0,
+            checksum: 0,
+            urgent_ptr: 0,
+        },
+        payload: vec![],
+    };
+
+    let ip_fields = Ipv4HeaderFields {
+        version: 4,
+        ihl: 5,
+        tos: 0,
+        total_length: 40,
+        identification: 0,
+        flags: 0,
+        fragment_offset: 0,
+        ttl: 64,
+        protocol: 6,
+        source: recv_ip.destination,
+        destination: recv_ip.source,
+    };
+
+    let ip_chk = ip_checksum(&ip_fields);
+    tcp_packet.header.checksum = tcp_checksum(recv_ip.destination, recv_ip.source, &tcp_packet);
+
+    let ip_header = Ipv4Header { fields: ip_fields, header_checksum: ip_chk };
+    dev.send(&create_packet(&tcp_packet, &ip_header));
+    println!("RST sent");
+}
+pub fn send_fin(dev: &tun_rs::SyncDevice, recv_ip: &Ipv4HeaderFields, recv_tcp: &TCPHeader, seq: u32, ack: u32) {
+    let mut tcp_packet = TCPPacket {
+        header: TCPHeader {
+            src_port: recv_tcp.dst_port,
+            dst_port: recv_tcp.src_port,
+            seq_num: seq,
+            ack_num: ack,
+            data_offset: 5,
+            flags: 0x11,
+            window: 64240,
+            checksum: 0,
+            urgent_ptr: 0,
+        },
+        payload: vec![],
+    };
+    let ip_fields = Ipv4HeaderFields {
+        version: 4,
+        ihl: 5,
+        tos: 0,
+        total_length: 40,
+        identification: 0,
+        flags: 0,
+        fragment_offset: 0,
+        ttl: 64,
+        protocol: 6,
+        source: recv_ip.destination,
+        destination: recv_ip.source,
+    };
+    let ip_chk = ip_checksum(&ip_fields);
+    tcp_packet.header.checksum = tcp_checksum(recv_ip.destination, recv_ip.source, &tcp_packet);
+    let ip_header = Ipv4Header { fields: ip_fields, header_checksum: ip_chk };
+    dev.send(&create_packet(&tcp_packet, &ip_header));
+    println!("FIN sent");
+}
+pub fn send_ack(dev: &tun_rs::SyncDevice, recv_ip: &Ipv4HeaderFields, recv_tcp: &TCPHeader, seq: u32, ack: u32) {
+    let mut tcp_packet = TCPPacket {
+        header: TCPHeader {
+            src_port: recv_tcp.dst_port,
+            dst_port: recv_tcp.src_port,
+            seq_num: seq,
+            ack_num: ack,
+            data_offset: 5,
+            flags: 0x10,
+            window: 64240,
+            checksum: 0,
+            urgent_ptr: 0,
+        },
+        payload: vec![],
+    };
+    let ip_fields = Ipv4HeaderFields {
+        version: 4,
+        ihl: 5,
+        tos: 0,
+        total_length: 40,
+        identification: 0,
+        flags: 0,
+        fragment_offset: 0,
+        ttl: 64,
+        protocol: 6,
+        source: recv_ip.destination,
+        destination: recv_ip.source,
+    };
+    let ip_chk = ip_checksum(&ip_fields);
+    tcp_packet.header.checksum = tcp_checksum(recv_ip.destination, recv_ip.source, &tcp_packet);
+    let ip_header = Ipv4Header { fields: ip_fields, header_checksum: ip_chk };
+    dev.send(&create_packet(&tcp_packet, &ip_header));
+    println!("ACK sent");
 }

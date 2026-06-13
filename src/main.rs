@@ -1,191 +1,29 @@
+use tcp::protocol::ACK;
+use tcp::protocol::RST;
 use tun_rs::DeviceBuilder;
 use tun_rs::InterruptEvent;
 use rand::Rng;
 use std::time::Duration;
 use std::io::ErrorKind;
 use tcp::{
-    parser, tcp_parser, ip_checksum, tcp_checksum, create_packet,
+    parser, tcp_parser, ip_checksum, tcp_checksum, create_packet,check_flags,print_ipv4,print_ipv6,print_tcp,send_ack,send_fin,send_rst,
     Packet, Ipv4Packet, Ipv6Header, TCPPacket,
     TCPState, Ipv4Header, Ipv4HeaderFields, TCPHeader,TCB,ConnectionKey
 };
 use std::collections::HashMap;
 use std::collections::HashSet;
-fn parse_request(buf: &[u8]) -> Option<(&str, &str)> {
-    let line = std::str::from_utf8(buf).ok()?;
-    let line = line.trim_end_matches("\r\n");
-    let mut parts = line.splitn(2, ' ');
-    let method = parts.next()?;
-    let filename = parts.next()?;
-    Some((method, filename))
-}
 
 
-fn send_rst(dev: &tun_rs::SyncDevice, recv_ip: &Ipv4HeaderFields, recv_tcp: &TCPHeader) {
-    let mut tcp_packet = TCPPacket {
-        header: TCPHeader {
-            src_port: recv_tcp.dst_port,
-            dst_port: recv_tcp.src_port,
-            seq_num: recv_tcp.ack_num,
-            ack_num: recv_tcp.seq_num + 1,
-            data_offset: 5,
-            flags: 0x04,
-            window: 0,
-            checksum: 0,
-            urgent_ptr: 0,
-        },
-        payload: vec![],
-    };
-
-    let ip_fields = Ipv4HeaderFields {
-        version: 4,
-        ihl: 5,
-        tos: 0,
-        total_length: 40,
-        identification: 0,
-        flags: 0,
-        fragment_offset: 0,
-        ttl: 64,
-        protocol: 6,
-        source: recv_ip.destination,
-        destination: recv_ip.source,
-    };
-
-    let ip_chk = ip_checksum(&ip_fields);
-    tcp_packet.header.checksum = tcp_checksum(recv_ip.destination, recv_ip.source, &tcp_packet);
-
-    let ip_header = Ipv4Header { fields: ip_fields, header_checksum: ip_chk };
-    dev.send(&create_packet(&tcp_packet, &ip_header));
-    println!("RST sent");
-}
-fn send_fin(dev: &tun_rs::SyncDevice, recv_ip: &Ipv4HeaderFields, recv_tcp: &TCPHeader, seq: u32, ack: u32) {
-    let mut tcp_packet = TCPPacket {
-        header: TCPHeader {
-            src_port: recv_tcp.dst_port,
-            dst_port: recv_tcp.src_port,
-            seq_num: seq,
-            ack_num: ack,
-            data_offset: 5,
-            flags: 0x11,
-            window: 64240,
-            checksum: 0,
-            urgent_ptr: 0,
-        },
-        payload: vec![],
-    };
-    let ip_fields = Ipv4HeaderFields {
-        version: 4,
-        ihl: 5,
-        tos: 0,
-        total_length: 40,
-        identification: 0,
-        flags: 0,
-        fragment_offset: 0,
-        ttl: 64,
-        protocol: 6,
-        source: recv_ip.destination,
-        destination: recv_ip.source,
-    };
-    let ip_chk = ip_checksum(&ip_fields);
-    tcp_packet.header.checksum = tcp_checksum(recv_ip.destination, recv_ip.source, &tcp_packet);
-    let ip_header = Ipv4Header { fields: ip_fields, header_checksum: ip_chk };
-    dev.send(&create_packet(&tcp_packet, &ip_header));
-    println!("FIN sent");
-}
-fn send_ack(dev: &tun_rs::SyncDevice, recv_ip: &Ipv4HeaderFields, recv_tcp: &TCPHeader, seq: u32, ack: u32) {
-    let mut tcp_packet = TCPPacket {
-        header: TCPHeader {
-            src_port: recv_tcp.dst_port,
-            dst_port: recv_tcp.src_port,
-            seq_num: seq,
-            ack_num: ack,
-            data_offset: 5,
-            flags: 0x10,
-            window: 64240,
-            checksum: 0,
-            urgent_ptr: 0,
-        },
-        payload: vec![],
-    };
-    let ip_fields = Ipv4HeaderFields {
-        version: 4,
-        ihl: 5,
-        tos: 0,
-        total_length: 40,
-        identification: 0,
-        flags: 0,
-        fragment_offset: 0,
-        ttl: 64,
-        protocol: 6,
-        source: recv_ip.destination,
-        destination: recv_ip.source,
-    };
-    let ip_chk = ip_checksum(&ip_fields);
-    tcp_packet.header.checksum = tcp_checksum(recv_ip.destination, recv_ip.source, &tcp_packet);
-    let ip_header = Ipv4Header { fields: ip_fields, header_checksum: ip_chk };
-    dev.send(&create_packet(&tcp_packet, &ip_header));
-    println!("ACK sent");
-}
 
 
-fn print_ipv4(h: &Ipv4Packet) {
-    println!("--- IPv4 Packet ---");
-    println!("Version: {}", h.header.fields.version);
-    println!("IHL: {}", h.header.fields.ihl);
-    println!("Protocol: {}", h.header.fields.protocol);
-    println!("Source: {}.{}.{}.{}",
-        h.header.fields.source[0],
-        h.header.fields.source[1],
-        h.header.fields.source[2],
-        h.header.fields.source[3]);
-    println!("Destination: {}.{}.{}.{}",
-        h.header.fields.destination[0],
-        h.header.fields.destination[1],
-        h.header.fields.destination[2],
-        h.header.fields.destination[3]);
-    println!("-------------------");
-}
-
-fn print_tcp(tcp: &TCPPacket) {
-    let h = &tcp.header;
-    let f = h.flags & 0b00111111;
-
-    let flag_str = match f {
-        0b000010 => "SYN".to_string(),
-        0b010010 => "SYN-ACK".to_string(),
-        0b010000 => "ACK".to_string(),
-        0b000001 => "FIN".to_string(),
-        0b010001 => "FIN-ACK".to_string(),
-        0b000100 => "RST".to_string(),
-        0b011000 => "PSH-ACK".to_string(),
-        _ => {
-            let mut s = Vec::new();
-            if f & 0b100000 != 0 { s.push("URG") }
-            if f & 0b010000 != 0 { s.push("ACK") }
-            if f & 0b001000 != 0 { s.push("PSH") }
-            if f & 0b000100 != 0 { s.push("RST") }
-            if f & 0b000010 != 0 { s.push("SYN") }
-            if f & 0b000001 != 0 { s.push("FIN") }
-            s.join("-")
-        }
-    };
-
-    println!("--- TCP ---");
-    println!("Src Port: {}", h.src_port);
-    println!("Dst Port: {}", h.dst_port);
-    println!("Seq:      {}", h.seq_num);
-    println!("Ack:      {}", h.ack_num);
-    println!("Flags:    {}", flag_str);
-    println!("-----------");
-}
-
-fn print_ipv6(_: &Ipv6Header) {
-    println!("IPv6 packet");
-}
-
+/*
+ * This is just me creating a TUN device. To greatly simplify things
+ * this is the interface "through" which I "recieve" or "send" raw IP packets
+ */
 fn main() {
     let dev = DeviceBuilder::new()
-        .name("tun0")
-        .ipv4("10.0.0.12", 24, None)
+        .name("tun0") //name
+        .ipv4("10.0.0.12", 24, None) //Ip address
         .mtu(1500)
         .build_sync()
         .unwrap();
@@ -224,17 +62,22 @@ fn main() {
                                 dst_port:tcp.header.dst_port
 
                             };
+
+
                             if let Some(tcb) = connections.get_mut(&key) {
                                 let flags = tcp.header.flags;
 
-                                if flags & 0b000100 != 0 {
+                                if check_flags(&flags,RST){
                                     connections.remove(&key);
                                     println!("RST received, connection aborted");
                                     continue;
                                 }
+
                                 match tcb.state {
                                     TCPState::SynReceived => {
-                                        if (flags & 0x10) != 0 && (flags & 0x02) == 0 {
+                                        if check_flags(&flags, ACK) {
+
+
                                             if tcp.header.ack_num == tcb.snd_nxt {
                                                 tcb.state = TCPState::Established;
                                                 tcb.snd_una = tcp.header.ack_num;
@@ -248,8 +91,7 @@ fn main() {
 
 
                                         }
-                                        else if (flags & 0x02) != 0 {
-                                                println!("Duplicate SYN in SynReceived");
+                                        else {
                                                 send_rst(&dev, &h.header.fields, &tcp.header);
                                                 connections.remove(&key);
                                                 continue;
@@ -265,18 +107,7 @@ fn main() {
                                             }
 
                                             if flags & 0x18 == 0x18 {
-                                                if tcp.header.seq_num == tcb.rcv_nxt {
-                                                    match parse_request(&tcp.payload) {
-                                                        Some(("GET", filename)) => { println!("GET request received: {}", filename); }
-                                                        Some(("PUT", rest))     => { println!("PUT request received: {}", rest); }
-                                                        Some(("DELETE", filename)) => { println!("DELETE request received: {}", filename); }
-                                                        _ => { println!("Unknown request"); }
-                                                    }
-                                                    tcb.rcv_nxt += tcp.payload.len() as u32;
-                                                    send_ack(&dev, &h.header.fields, &tcp.header, tcb.snd_nxt, tcb.rcv_nxt);
-                                                } else {
-                                                    println!("Out of order segment, expected {}, got {}", tcb.rcv_nxt, tcp.header.seq_num);
-                                                }
+
                                             }
                                             if flags & 0x01 != 0 {
                                                 if tcp.header.seq_num == tcb.rcv_nxt {

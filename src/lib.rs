@@ -1,6 +1,12 @@
 pub mod protocol;
 pub mod parser;
 pub mod checksum;
+pub mod print;
+
+pub use print::{
+    print_tcp,print_ipv4,print_ipv6
+};
+
 pub use protocol::{
     Packet,
     Ipv4Packet,
@@ -24,5 +30,5 @@ pub use checksum::{
 };
 
 pub use protocol::{
-    create_packet,
+    create_packet,check_flags,send_fin,send_ack,send_rst
 };
